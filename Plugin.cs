@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections;
+using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
@@ -8,206 +7,202 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using Advanced_Combat_Tracker;
-
+using DiscordRPC;
 using Timer = System.Threading.Timer;
 
 namespace ACT.FFXIV_Discord
 {
-    public class Plugin : IActPluginV1
+    public class Plugin : IDisposable
     {
         private const int UpdatePeriod = 5000;
 
-        private Label m_copyRight;
-        private Label m_pluginStatusText;
-        private Timer m_newTimer;
-        
-        public void DeInitPlugin()
+        private readonly Timer timerDetectPlugin;
+
+        private readonly DiscordRpcClient client;
+
+        private readonly Label labelCopyRight;
+        private readonly Label labelPluginStatusText; // Dispose 하지 않도록 주의
+
+        private readonly RichPresence richPresence = new RichPresence {Assets = new Assets() };
+
+        private object pluginLock = new object();
+        private FFXIVPluginWrapper plugin;
+
+        public Plugin(TabPage pluginScreenSpace, Label pluginStatusText)
         {
-            if (this.m_newTimer != null)
+            this.timerDetectPlugin = new Timer(this.DetectGamePlugin, null, UpdatePeriod, Timeout.Infinite);
+
+            this.labelCopyRight = new Label
             {
-                this.m_newTimer.Change(Timeout.Infinite, Timeout.Infinite);
-                this.m_newTimer.Dispose();
-                this.m_newTimer = null;
-            }
+                Cursor = Cursors.Hand,
+                Dock = DockStyle.Fill,
+                Font = new Font(pluginScreenSpace.Font.FontFamily, 16, FontStyle.Bold),
+                Text = "CopyRight (C) By RyuaNerin",
+                TextAlign = ContentAlignment.MiddleCenter,
+            };
 
-            DiscordRpc.ClearPresence();
-            
-            ActGlobals.oFormActMain.OnCombatStart -= this.OFormActMain_OnCombatStart;
-            ActGlobals.oFormActMain.OnCombatEnd   -= this.OFormActMain_OnCombatEnd;
+            this.labelCopyRight.MouseDoubleClick += this.CopyRight_MouseDoubleClick;
 
-            this.m_pluginStatusText.Text = "Deinited.";
-            this.m_pluginStatusText = null;
-        }
-
-        public void InitPlugin(TabPage pluginScreenSpace, Label pluginStatusText)
-        {
-            if (this.m_copyRight == null)
-            {
-                this.m_copyRight = new Label();
-                this.m_copyRight.Text = "CopyRight (C) By RyuaNerin";
-                this.m_copyRight.TextAlign = ContentAlignment.MiddleCenter;
-                this.m_copyRight.Font = new Font(pluginScreenSpace.Font.FontFamily, 16, FontStyle.Bold);
-                this.m_copyRight.Dock = DockStyle.Fill;
-                this.m_copyRight.Cursor = Cursors.Hand;
-                this.m_copyRight.MouseDoubleClick +=
-                    (s, e) => Process.Start(
-                        new ProcessStartInfo {
-                            FileName = "https://github.com/RyuaNerin/ACT.FFXIV_Discord",
-                            UseShellExecute = true
-                            }
-                        );
-            }
-
-            pluginScreenSpace.Controls.Add(this.m_copyRight);
+            pluginScreenSpace.Controls.Add(this.labelCopyRight);
             pluginScreenSpace.Text = "FFXIV_Discord";
 
-            this.m_pluginStatusText = pluginStatusText;
-            this.m_pluginStatusText.Text = $"Inited. (v{System.Reflection.Assembly.GetAssembly(typeof(Plugin)).GetName().Version.ToString()})";
-            
-            ActGlobals.oFormActMain.OnCombatStart += this.OFormActMain_OnCombatStart;
-            ActGlobals.oFormActMain.OnCombatEnd   += this.OFormActMain_OnCombatEnd;
+            this.labelPluginStatusText = pluginStatusText;
+            this.labelPluginStatusText.Text = $"Inited. (v{Assembly.GetAssembly(typeof(Plugin)).GetName().Version})";
 
-            this.m_newTimer = new Timer(this.UpdateDiscordPresence, null, UpdatePeriod, UpdatePeriod);
+            this.client = new DiscordRpcClient("455179024310861827");
+            this.client.Initialize();
+        }
 
-            var handlers = new DiscordRpc.EventHandlers
+        ~Plugin()
+        {
+            this.Dispose(false);
+        }
+
+        public void Dispose()
+        {
+            this.Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private bool disposed = false;
+        private void Dispose(bool disposing)
+        {
+            if (this.disposed) return;
+            this.disposed = true;
+
+            if (disposing)
             {
-                readyCallback = HandleReadyCallback,
-                errorCallback = HandleErrorCallback,
-                disconnectedCallback = HandleDisconnectedCallback
-            };
-            DiscordRpc.Initialize("455179024310861827", ref handlers, true, null);
-        }
+                this.timerDetectPlugin.Change(Timeout.Infinite, Timeout.Infinite);
+                this.timerDetectPlugin.Dispose();
 
-        private void OFormActMain_OnCombatStart(bool isImport, CombatToggleEventArgs encounterInfo)
-        {
-            this.m_newTimer.Change(Timeout.Infinite, Timeout.Infinite);
-            UpdateDiscordPresence(true);
-        }
-        private void OFormActMain_OnCombatEnd(bool isImport, CombatToggleEventArgs encounterInfo)
-        {
-            this.m_newTimer.Change(UpdatePeriod, UpdatePeriod);
-            UpdateDiscordPresence(true);
-        }
-        
-        private bool GetPlayerJob(out string name, out int job)
-        {
-            name = null;
-            job = 0;
-            
-            var plugin = ActGlobals.oFormActMain.ActPlugins
-                    ?.Where(e => e.pluginFile.Name.IndexOf("FFXIV_ACT_Plugin", StringComparison.CurrentCultureIgnoreCase) >= 0)
-                    ?.Where(e => e.lblPluginStatus.Text.IndexOf("FFXIV Plugin Started.", StringComparison.CurrentCultureIgnoreCase) >= 0)
-                    ?.FirstOrDefault()
-                    ?.pluginObj;
-            if (plugin == null)
-                return false;
+                this.client.ClearPresence();
+                this.client.Invoke();
+                this.client.Dispose();
 
-            var memory = plugin.GetType()
-                .GetField("_Memory", BindingFlags.GetField | BindingFlags.NonPublic | BindingFlags.Instance)
-                ?.GetValue(plugin);
-            if (memory == null)
-                return false;
-
-            var config = memory.GetType()
-                .GetField("_config", BindingFlags.GetField | BindingFlags.NonPublic | BindingFlags.Instance)
-                ?.GetValue(memory);
-            if (memory == null)
-                return false;
-
-            var scanCombatants = config.GetType()
-                .GetField("ScanCombatants", BindingFlags.GetField | BindingFlags.NonPublic | BindingFlags.Instance)
-                ?.GetValue(config);
-            if (scanCombatants == null)
-                return false;
-
-            var list = scanCombatants.GetType()
-                .GetField("_Combatants", BindingFlags.GetField | BindingFlags.NonPublic | BindingFlags.Instance)
-                ?.GetValue(scanCombatants);
-            if (list == null)
-                return false;
-
-            foreach (dynamic item in (IEnumerable)list)
-            {
-                if (item == null) continue;
-
-                job = (byte)item.Job;
-                name = item.Name.ToString();
-
-                return true;
+                this.labelCopyRight.Dispose();
             }
 
-            return false;
-        }
-        
-        private void UpdateDiscordPresence(object state)
-        {
-            this.UpdateDiscordPresence(false);
+            this.ReconnectPlugin(null);
+
+            this.labelPluginStatusText.Text = "Deinited.";
         }
 
-        private string m_lastName;
-        private int m_lastJob;
-        private string m_lastZone;
-        private long m_zoneChanged;
-
-        private int m_updating = 0;
-        private void UpdateDiscordPresence(bool force)
+        private void CopyRight_MouseDoubleClick(object sender, MouseEventArgs e)
         {
-            if (force)
-            {
-                while (Interlocked.Exchange(ref this.m_updating, 1) == 0)
-                    Thread.Sleep(100);
-            }
-            else
-            {
-                if (Interlocked.Exchange(ref this.m_updating, 1) != 0)
-                    return;
-            }
-
             try
             {
-                if (GetPlayerJob(out string curName, out int curJob))
-                {
-                    this.m_lastJob = curJob;
-
-                    if (!string.IsNullOrWhiteSpace(curName))
-                        this.m_lastName = curName;
-                }
-
-                if (this.m_lastName == null)
-                    return;
-                
-                var curZone = ActGlobals.oFormActMain.CurrentZone;
-
-                var presence = new DiscordRpc.RichPresence();
-                presence.largeImageKey = "ffxiv";
-                
-                if (1 <= this.m_lastJob && this.m_lastJob <= 35)
-                    presence.smallImageKey = this.m_lastJob.ToString();
-
-                presence.details = TruncateString(this.m_lastName);
-
-                if (!string.IsNullOrWhiteSpace(curZone))
-                {
-                    if (this.m_lastZone != curZone)
+                Process.Start(
+                    new ProcessStartInfo
                     {
-                        this.m_zoneChanged = DateTimeOffset.Now.ToUnixTimeSeconds();
-                        this.m_lastZone = curZone;
+                        FileName = "https://github.com/RyuaNerin/ACT.FFXIV_Discord",
+                        UseShellExecute = true
                     }
-
-                    presence.state = TruncateString(ActGlobals.oFormActMain.CurrentZone);
-                    presence.startTimestamp = this.m_zoneChanged;
-                }
-
-                DiscordRpc.UpdatePresence(presence);
+                )?.Dispose();
             }
-            finally
+            catch
             {
-                Interlocked.Exchange(ref this.m_updating, 0);
             }
         }
-        private static void HandleReadyCallback(ref DiscordRpc.DiscordUser connectedUser) { }
-        private static void HandleErrorCallback(int errorCode, string message) { }
-        private static void HandleDisconnectedCallback(int errorCode, string message) { }
+
+        private void DetectGamePlugin(object state)
+        {
+            var plugin = ActGlobals.oFormActMain.ActPlugins
+                    .Where(e => e.pluginFile.Name.IndexOf("FFXIV_ACT_Plugin", StringComparison.CurrentCultureIgnoreCase) >= 0)
+                    .Where(e => e.lblPluginStatus.Text.IndexOf("FFXIV Plugin Started.", StringComparison.CurrentCultureIgnoreCase) >= 0)
+                    .FirstOrDefault()
+                    ?.pluginObj;
+
+            if (plugin != null)
+            {
+                this.ReconnectPlugin(plugin);
+            }
+
+            this.timerDetectPlugin.Change(UpdatePeriod, Timeout.Infinite);
+        }
+
+        private void ReconnectPlugin(object plugin)
+        {
+            lock (this.pluginLock)
+            {
+                if (this.plugin?.Raw == plugin)
+                    return;
+
+                if (this.plugin != null)
+                {
+                    this.plugin.Dispose();
+                }
+
+                if (plugin != null)
+                {
+                    this.plugin = new FFXIVPluginWrapper(plugin);
+                    this.plugin.DataSubscription.RegisterEvents();
+                    this.plugin.DataSubscription.PrimaryPlayerChanged += this.DataSubscription_PrimaryPlayerChanged;
+                    this.plugin.DataSubscription.PlayerStatsChanged   += this.DataSubscription_PlayerStatsChanged;
+                    this.plugin.DataSubscription.ZoneChanged          += this.DataSubscription_ZoneChanged;
+
+                    this.SetFirstPresence();
+                }
+            }
+        }
+
+        private void SetFirstPresence()
+        {
+            var player = this.plugin.DataRepository.GetPlayer();
+            var playerId = this.plugin.DataRepository.GetCurrentPlayerID();
+            var playerCombatant = this.plugin.DataRepository.GetCombatantList().FirstOrDefault(e => e.ID == playerId);
+
+            this.richPresence.Details = playerCombatant?.Name;
+            this.richPresence.Assets.LargeImageKey = player.JobID.ToString();
+            this.richPresence.State = TruncateString(ActGlobals.oFormActMain.CurrentZone);
+            this.richPresence.Timestamps = Timestamps.Now;
+
+            this.UpdatePresence();
+        }
+
+        private void DataSubscription_PrimaryPlayerChanged()
+        {
+            lock (this.pluginLock)
+            {
+                try
+                {
+                    var playerId = this.plugin.DataRepository.GetCurrentPlayerID();
+                    var playerCombatant = this.plugin.DataRepository.GetCombatantList().First(e => e.ID == playerId);
+
+                    this.richPresence.Details = playerCombatant.Name;
+                }
+                catch
+                {
+                    this.richPresence.Details = null;
+                }
+                finally
+                {
+                    this.UpdatePresence();
+                }
+            }
+        }
+
+        private void DataSubscription_PlayerStatsChanged(object playerStats)
+        {
+            try
+            {
+                var playerStat = new FFXIVPluginWrapper.IPlayer(playerStats);
+
+                this.richPresence.Assets.LargeImageKey = playerStat.JobID.ToString();
+
+                this.UpdatePresence();
+            }
+            catch
+            {
+            }
+        }
+
+        private void DataSubscription_ZoneChanged(uint ZoneID, string ZoneName)
+        {
+            this.richPresence.State = TruncateString(ZoneName);
+            this.richPresence.Timestamps = Timestamps.Now;
+
+            this.UpdatePresence();
+        }
 
         private static string TruncateString(string s)
         {
@@ -220,6 +215,18 @@ namespace ACT.FFXIV_Discord
             } while (Encoding.Unicode.GetByteCount(s) < 128 - 3);
 
             return s + "...";
+        }
+
+        private void UpdatePresence()
+        {
+            try
+            {
+                this.client.SetPresence(this.richPresence);
+                this.labelCopyRight.Invoke(new Action(() => this.client.Invoke()));
+            }
+            catch
+            {
+            }
         }
     }
 }

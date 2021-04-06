@@ -1,21 +1,22 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 15
-VisualStudioVersion = 15.0.27703.2026
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.31112.23
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ACT.FFXIV_Discord", "ACT.FFXIV_Discord.csproj", "{896E78C9-AD5A-4ADF-A29A-632FE0EE74C4}"
 EndProject
 Project("{911E67C6-3D85-4FCE-B560-20A9C3E3FF48}") = "Advanced Combat Tracker", "C:\ACT\Advanced Combat Tracker.exe", "{3EFA0249-C41E-4C78-B720-C06D65B046A3}"
 	ProjectSection(DebuggerProjectSystem) = preProject
 		PortSupplier = 00000000-0000-0000-0000-000000000000
-		Executable = C:\ACT\Advanced Combat Tracker.exe
+		Executable = C:\act\Advanced Combat Tracker\Advanced Combat Tracker.exe
 		RemoteMachine = MY-DESKTOP
-		StartingDirectory = C:\ACT
+		StartingDirectory = C:\act\Advanced Combat Tracker\
 		Environment = 기본값
 		LaunchingEngine = 00000000-0000-0000-0000-000000000000
 		UseLegacyDebugEngines = No
 		LaunchSQLEngine = No
 		AttachLaunchAction = No
+		IORedirection = Auto
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{2D2433B8-283C-4256-AD91-621C16A673D2}"
